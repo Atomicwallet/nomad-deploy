@@ -1,0 +1,190 @@
+#!/usr/bin/python3
+import nomad
+import jinja2
+import collections
+import pprint
+import yaml
+import os
+import argparse
+import sys
+import time
+
+############################################################
+#
+#                           Utils
+#
+############################################################
+
+def parseString (string):
+  s = string.lower()
+  if (s == 'true'):
+    return True
+  if (s == 'false'):
+    return False
+  return string
+
+printer = pprint.PrettyPrinter(indent=4)
+parser = argparse.ArgumentParser(description='Render a template & run Nomad deployment')
+
+parser.add_argument(
+    'templateFile',
+    help='template file name'
+)
+
+parser.add_argument(
+    '--varFile', 
+    dest='varFile', 
+    action='store',
+    help='filename with variables'
+)
+
+parser.add_argument(
+    '--var', 
+    dest='var', 
+    action='append',
+    help='filename with variables'
+)
+
+parser.add_argument(
+    '--render', 
+    dest='render', 
+    action='store_true',
+    help='output template to stdout before talking to nomad'
+)
+
+parser.add_argument(
+    '--recursive', 
+    dest='recursive', 
+    action='store_true',
+    help='recursively render template, until there are no template vars left'
+)
+
+parser.add_argument(
+    '--dry', 
+    dest='dry', 
+    action='store_true',
+    help='run the planning phase only'
+)
+
+############################################################
+#
+#                      Render template
+#
+############################################################
+
+# load environment variables
+vars = dict(os.environ)
+
+# parse booleans from strings (because of template rendering)
+vars = {k:parseString(v) for k, v in vars.items()}
+
+args = parser.parse_args()
+
+# load values from provided --varFile 
+varName = args.varFile
+if varName != None:
+    varFile = yaml.load(open(varName)) or {}
+    vars = dict(collections.ChainMap(varFile, vars))
+
+# load values from command line parameters --var (and parse booleans from strings)
+if args.var != None:
+    argsVars = {x.split('=')[0]:parseString(x.split('=')[1]) for x in args.var}
+    vars = dict(collections.ChainMap(argsVars, vars))
+
+# load template provided from command line
+templateName = args.templateFile
+templateFile = open(templateName, "r")
+templateString = templateFile.read()
+
+def render(tpl, values):
+    return jinja2.Template(tpl).render(values)
+
+def recursive_render(tpl, values):
+     prev = tpl
+     while True:
+         curr = render(prev, values)
+         if curr != prev:
+             prev = curr
+         else:
+             return curr
+
+# recursive because of placeholders in "varFile"
+renderedTemplate = recursive_render(templateString, vars) if args.recursive else render(templateString, vars)
+
+# remove empty lines
+lines = renderedTemplate.splitlines()
+finalTemplate = ""
+counter = 1
+for line in lines:
+    if line != "":
+        finalTemplate += line
+        if len(lines) != counter:
+             finalTemplate += "\n"
+    counter += 1
+
+if args.render == True:
+    print(finalTemplate)
+
+############################################################
+#
+#                      Deployment
+#
+############################################################
+
+n = nomad.Nomad(host=os.environ['NOMAD_ADDR'], secure=True, timeout=5, verify=False)
+
+try:
+    # Render Terraform file to JSON
+    jsonTemplate = n.jobs.parse(finalTemplate)
+
+    # Submit job to Nomad
+    plannedJob = n.job.plan_job(vars['NOMAD_ID'], { 'Job': jsonTemplate })
+    # Check if allocations failed
+    if plannedJob['FailedTGAllocs'] is not None and len(plannedJob['FailedTGAllocs']) > 0:
+        print('Evaluation failed:')
+        printer.pprint(plannedJob)
+        sys.exit(1)
+
+
+    if args.dry == True:
+        print('Dry run successful')
+        printer.pprint(plannedJob)
+        sys.exit(0)
+
+    print('Dry run successful, registering job...')
+    registeredJob = n.jobs.register_job({ 'Job': jsonTemplate })
+    print('Job registered, Evaluation ID: ', registeredJob['EvalID'])
+
+    # Wait for Evaluation to finish
+    while True: 
+        eval = n.evaluation.get_evaluation(registeredJob['EvalID'])
+        if eval['Status'] == 'complete':
+            break
+        
+        time.sleep(1)
+
+    # Check if allocations failed
+    if eval['FailedTGAllocs'] is not None and len(eval['FailedTGAllocs']) > 0:
+        print('Evaluation failed:')
+        printer.pprint(eval)
+        sys.exit(1)
+
+    print('Evaluation complete, Deployment ID:', eval['DeploymentID'])
+
+    # Wait for deployment to finish
+    while True: 
+        deployment = n.deployment.get_deployment(eval['DeploymentID'])
+
+        if deployment['Status'] == 'failed':
+            print('Deployment failed:', deployment['StatusDescription'])
+            sys.exit(1)
+        if deployment['Status'] == 'successful':
+            print('Deployment successful:', deployment['StatusDescription'])
+            sys.exit(0)
+        
+        time.sleep(1)
+
+except nomad.api.exceptions.BaseNomadException as err:
+    print(err.nomad_resp.reason)
+    print(err.nomad_resp.text)
+    sys.exit(1)
