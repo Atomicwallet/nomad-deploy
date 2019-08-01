@@ -3,6 +3,7 @@
 A Python 3 script that renders Jinja template and schedules a new job on Nomad
 
 ## Building
+
 Easy! Run:
 
     python setup.py sdist bdist_wheel && twine upload dist/*
@@ -10,6 +11,7 @@ Easy! Run:
 You have to be logged in and have the correct access right to `nomad-deploy` in pip.
 
 ## Installing
+
 Even easier:
 
     pip install nomad-deploy
@@ -17,6 +19,7 @@ Even easier:
 Now `nomad-deploy` command is available system-wide.
 
 ## Running
+
 After installing `nomad-deploy` with pip, running it is easy
 
     nomad-deploy --varFile variables.yml template.nomad

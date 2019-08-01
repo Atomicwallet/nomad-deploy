@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name = "nomad-deploy",
-    version = "1.0.0",
+    version = "1.0.1",
     author = "Iakov Markov",
     author_email = "iakov.markov@ataccama.com",
     description = "A small Python 3 utiility to render jinja 2 tempaltes and schedule a Nomad deployment.",
