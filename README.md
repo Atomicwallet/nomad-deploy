@@ -30,3 +30,9 @@ Available keys:
 * `--render` - output resulting template to stdout
 * `--dry` - do not run the job, only test if resources can be allocated
 * `--recursive` - if you're using variables in the varFile, you can recursively re-render the template until there are no more substitutions you can make; this will break control statements in template file
+
+## Example
+
+To deploy ElasticSearch on your Nomad cluster, try the available examples:
+
+    nomad-deploy --varFile ./examples/vars.yml ./examples/template.nomad

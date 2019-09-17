@@ -1,0 +1,5 @@
+---
+NOMAD_ID: ElasticSearch
+REGION: euc1
+DC: aws
+IMAGE: 'elasticsearch:6.8.1'
